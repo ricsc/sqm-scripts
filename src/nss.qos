@@ -61,10 +61,15 @@ cake_egress() {
 }
 
 egress() {
-
+    sqm_debug "egress"
     IFACE=eth0
+    MTU=$(get_mtu $IFACE)
+    BURST="$(get_burst ${MTU:-1514} ${UPLINK} ${ESHAPER_BURST_DUR_US})"
+    BURST=${BURST:-1514}
 
-    $TC qdisc add dev $IFACE root handle 1: nsstbl rate ${UPLINK}kbit burst 1Mb
+    SILENT=1 $TC qdisc del dev $IFACE root
+
+    $TC qdisc add dev $IFACE root handle 1: nsstbl rate ${UPLINK}kbit burst $BURST
     $TC qdisc add dev $IFACE parent 1: handle 10: nssfq_codel limit 4096 flows 1024 quantum 1514 target 5ms interval 100ms set_default
 
 
@@ -80,20 +85,24 @@ cake_ingress() {
 }
 
 ingress() {
-
+    sqm_debug "ingress"
     #cut off ifb4
     DEV=`echo $DEV | cut -c 5-`
-    printf $DEV > /sys/module/nss_ifb/parameters/nss_dev_name
     DEV=nssifb
+    MTU=$(get_mtu $IFACE)
+    BURST="$(get_burst ${MTU:-1514} ${DOWNLINK} ${ISHAPER_BURST_DUR_US})"
+    BURST=${BURST:-1514}
 
-    BURST=" burst 1Mb "
-    
+    printf $DEV > /sys/module/nss_ifb/parameters/nss_dev_name
 
-    $TC qdisc add dev $DEV root handle 1: nsstbl rate ${DOWNLINK}kbit burst 1Mb
+    SILENT=1 $TC qdisc del dev $DEV root
+
+
+    $TC qdisc add dev $DEV root handle 1: nsstbl rate ${DOWNLINK}kbit burst $BURST
     $TC qdisc add dev $DEV parent 1: handle 10: nssfq_codel limit 4096 flows 1024 quantum 1514 target 5ms interval 100ms set_default
     
 
-    $IP link set up nssifb
+    $IP link set dev $DEV up
 
 
 }
@@ -102,5 +111,12 @@ sqm_prepare_script() {
     do_modules
     #quick workaround to fill dropdown, will fix this later
     #touch /var/run/sqm/available_qdiscs/nssfq_codel
+
+    case $QDISC in
+        cake*)
+            sqm_warn "Cake is not supported with this script; falling back to FQ-CoDel"
+            QDISC=nssfq_codel ;;
+    esac
+
     ipt_setup
 }
