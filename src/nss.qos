@@ -1,6 +1,6 @@
 ################################################################################
-# nss.qos (HW Accelerated Simple Traffic Shaper)
 #
+# nss.qos (HW Accelerated Simple Traffic Shaper)
 #
 ################################################################################
 #
@@ -8,7 +8,7 @@
 # it under the terms of the GNU General Public License version 2 as
 # published by the Free Software Foundation.
 #
-#  Copyright (C) 2020
+#  Copyright (C) 2020 Richard Schneidt
 #  
 #
 ################################################################################
@@ -22,7 +22,6 @@ ipt_setup() {
     IFACE=eth0
     
     ipt -t mangle -N QOS_MARK_${IFACE}
-    
     ipt -t mangle -A QOS_MARK_${IFACE} -j MARK --set-mark 0x2/${IPT_MASK}
     ipt -t mangle -A QOS_MARK_${IFACE} -m dscp --dscp-class CS1 -j MARK --set-mark 0x3/${IPT_MASK}
     ipt -t mangle -A QOS_MARK_${IFACE} -m dscp --dscp-class CS6 -j MARK --set-mark 0x1/${IPT_MASK}
@@ -47,14 +46,8 @@ ipt_setup() {
     fi
 
     ipt -t mangle -A POSTROUTING -o $IFACE -m mark --mark 0x00/${IPT_MASK} -g QOS_MARK_${IFACE}
-
-
     ipt -t mangle -A OUTPUT -p udp -m multiport --ports 123,53 -j DSCP --set-dscp-class AF42
-
-
 }
-
-
 
 cake_egress() {
     sqm_debug "Nothing here."
@@ -70,15 +63,12 @@ egress() {
     SILENT=1 $TC qdisc del dev $IFACE root
 
     $TC qdisc add dev $IFACE root handle 1: nsstbl rate ${UPLINK}kbit burst $BURST
-    $TC qdisc add dev $IFACE parent 1: handle 10: nssfq_codel limit 4096 flows 1024 quantum 1514 target 5ms interval 100ms set_default
-
+    $TC qdisc add dev $IFACE parent 1: handle 10: nssfq_codel `get_limit ${ILIMIT}` flows 1024 quantum 1514 target 5ms interval 100ms set_default
 
 
     $TC filter add dev $IFACE parent 1:0 protocol ip prio 0 u32 match ip protocol 1 0xff flowid 1:13
-
     $TC filter add dev $IFACE parent 1:0 protocol ipv6 prio 1 u32 match ip protocol 1 0xff flowid 1:13
 }
-
 
 cake_ingress() {
     sqm_debug "Nothing here."
@@ -100,7 +90,7 @@ ingress() {
 
 
     $TC qdisc add dev $DEV root handle 1: nsstbl rate ${DOWNLINK}kbit burst $BURST
-    $TC qdisc add dev $DEV parent 1: handle 10: nssfq_codel limit 4096 flows 1024 quantum 1514 target 5ms interval 100ms set_default
+    $TC qdisc add dev $DEV parent 1: handle 10: nssfq_codel `get_limit ${ILIMIT}` flows 1024 quantum 1514 target 5ms interval 100ms set_default
     
 
     $IP link set dev $DEV up
@@ -110,12 +100,10 @@ ingress() {
 
 sqm_prepare_script() {
     do_modules
-    #quick workaround to fill dropdown, will fix this later
-    #touch /var/run/sqm/available_qdiscs/nssfq_codel
 
     case $QDISC in
         cake*)
-            sqm_warn "Cake is not supported with this script; falling back to FQ-CoDel"
+            sqm_warn "Cake is not supported with this script; falling back to NSS FQ-CoDel"
             QDISC=nssfq_codel ;;
     esac
 
